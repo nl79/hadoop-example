@@ -12,6 +12,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
+import java.util.StringTokenizer;
 import java.io.BufferedReader;
 import java.io.*;
 import java.io.IOException;
@@ -32,8 +33,8 @@ public class RuleMiner extends Configured implements Tool
       return -1;
     }
 
-    String hdfsInputDir = args[0];
-    String hdfsOutputDirPrefix = args[1];
+    String inputPath = args[0];
+    String outputPath = args[1];
 
     int iterations = Integer.parseInt(args[2]);
     Double MIN_SUPPORT_PERCENT = Double.parseDouble(args[3]);
@@ -41,7 +42,7 @@ public class RuleMiner extends Configured implements Tool
 
     for(int iteration=1; iteration <= iterations; iteration++) {
 
-      boolean success = iterate(hdfsInputDir, hdfsOutputDirPrefix, iteration, MIN_SUPPORT_PERCENT, MAX_NUM_TXNS);
+      boolean success = iterate(inputPath, outputPath, iteration, MIN_SUPPORT_PERCENT, MAX_NUM_TXNS);
       if(!success) {
         System.err.println("Job Failed");
         return -1;
@@ -59,7 +60,7 @@ public class RuleMiner extends Configured implements Tool
     Configuration config = new Configuration();
     config.setInt("iteration", iteration);
     config.set("support", Double.toString(MIN_SUPPORT_PERCENT));
-    config.setInt("numTxns", MAX_NUM_TXNS);
+    config.setInt("total", MAX_NUM_TXNS);
 
     Job job = new Job(config, jobPrefix + iteration);
 
@@ -84,45 +85,55 @@ public class RuleMiner extends Configured implements Tool
   }
 
   public static class FirstPassMapper extends Mapper<Object, Text, Text, IntWritable> {
-    private final static IntWritable one = new IntWritable(1);
-    private Text item = new Text();
 
     public void map(Object key, Text transaction, Context context) throws IOException, InterruptedException {
 
-      // split the transaction into terms
-      String line = transaction.trim();
-      String[] terms = line.split("[\\s\\t]+");
+      StringTokenizer itr = new StringTokenizer(value.toString());
 
-      // transaction ID is the first item in the list.
-      int id = Integer.parseInt(words[0].trim());
+      private Text token = new Text();
 
-      List<Integer> items = new ArrayList<Integer>();
+      int id;
 
-      for(int i=1; i < terms.length; i++) {
-        items.add(Integer.parseInt(terms[i].trim()));
+      //first token is ID
+      if(itr.hasMoreTokens()) {
+        id = Integer.parseInt(itr.nextToken().toString());
       }
 
-      // Emit a count for each term
-      // context.write(term, new IntWritable(1));
+      while (itr.hasMoreTokens()) {
 
+        token.set(itr.nextToken().toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim());
+        context.write(token, new IntWritable(1));
+
+      }
     }
   }
 
   public static class RuleReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
-    public void reduce(Text itemset, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-      int countItemId = 0;
+    public void reduce(Text terms, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+
+
+      int count = 0;
+
+      // total up the number of occurances
+
       for (IntWritable value : values) {
-        countItemId += value.get();
+        count += value.get();
       }
 
-      String itemsetIds = itemset.toString();
+      String set = terms.toString();
 
+      // Get the support value from the config object
       Double support = Double.parseDouble(context.getConfiguration().get("support"));
-      Integer numTxns = context.getConfiguration().getInt("numTxns", 2);
+
+      Integer total = context.getConfiguration().getInt("total", 2);
 
 
       // calculate min support and add to the output
-      //  context.write(new Text(itemsetIds), new IntWritable(countItemId));
+      if(Apriori.hasSupport(support, total, count)) {
+        context.write(new Text(set), new IntWritable(count));
+      }
+
+      //
     }
   }
 
@@ -130,8 +141,8 @@ public class RuleMiner extends Configured implements Tool
     private final static IntWritable one = new IntWritable(1);
     private Text item = new Text();
 
-    private List<ItemSet> largeItemsetsPrevPass = new ArrayList<ItemSet>();
-    private List<ItemSet> candidateItemsets     = null;
+    private List<Set> largeItemsetsPrevPass = new ArrayList<Set>();
+    private List<Set> candidateItemsets     = null;
     private HashTreeNode hashTreeRootNode       = null;
 
     @Override
@@ -166,21 +177,21 @@ public class RuleMiner extends Configured implements Tool
           String finalWord = words[words.length-1];
           int supportCount = Integer.parseInt(finalWord);
           //System.out.println(items + " --> " + supportCount);
-          largeItemsetsPrevPass.add(new ItemSet(items, supportCount));
+          largeItemsetsPrevPass.add(new Set(items, supportCount));
         }
       }
       catch(Exception e)
       {
       }
 
-      candidateItemsets = AprioriUtils.getCandidateItemsets(largeItemsetsPrevPass, (iteration-1));
-      hashTreeRootNode = HashTreeUtils.buildHashTree(candidateItemsets, iteration); // This would be changed later
+      candidateItemsets = Apriori.getCandidateItemsets(largeItemsetsPrevPass, (iteration-1));
+      hashTreeRootNode = Apriori.buildHashTree(candidateItemsets, iteration); // This would be changed later
     }
 
     public void map(Object key, Text txnRecord, Context context) throws IOException, InterruptedException {
       Transaction txn = AprioriUtils.getTransaction(txnRecord.toString());
-      List<ItemSet> candidateItemsetsInTxn = HashTreeUtils.findItemsets(hashTreeRootNode, txn, 0);
-      for(ItemSet itemset : candidateItemsetsInTxn) {
+      List<Set> candidateSetsInTxn = Apriori.findSets(hashTreeRootNode, txn, 0);
+      for(Set itemset : candidateItemsetsInTxn) {
         item.set(itemset.getItems().toString());
         context.write(item, one);
       }
