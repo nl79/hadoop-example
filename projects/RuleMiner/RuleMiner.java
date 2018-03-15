@@ -86,7 +86,7 @@ public class RuleMiner extends Configured implements Tool
 
   public static class FirstPassMapper extends Mapper<Object, Text, Text, IntWritable> {
 
-    public void map(Object key, Text transaction, Context context) throws IOException, InterruptedException {
+    public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
 
       StringTokenizer itr = new StringTokenizer(value.toString());
 
@@ -113,6 +113,7 @@ public class RuleMiner extends Configured implements Tool
 
 
       int count = 0;
+
 
       // total up the number of occurances
 
@@ -143,7 +144,6 @@ public class RuleMiner extends Configured implements Tool
 
     private List<Set> largeItemsetsPrevPass = new ArrayList<Set>();
     private List<Set> candidateItemsets     = null;
-    private HashTreeNode hashTreeRootNode       = null;
 
     @Override
     public void setup(Context context) throws IOException {
@@ -184,17 +184,16 @@ public class RuleMiner extends Configured implements Tool
       {
       }
 
-      candidateItemsets = Apriori.getCandidateItemsets(largeItemsetsPrevPass, (iteration-1));
-      hashTreeRootNode = Apriori.buildHashTree(candidateItemsets, iteration); // This would be changed later
+      candidateItemsets = Apriori.getCandidateSets(largeItemsetsPrevPass, (iteration-1));
     }
 
     public void map(Object key, Text txnRecord, Context context) throws IOException, InterruptedException {
-      Transaction txn = AprioriUtils.getTransaction(txnRecord.toString());
-      List<Set> candidateSetsInTxn = Apriori.findSets(hashTreeRootNode, txn, 0);
-      for(Set itemset : candidateItemsetsInTxn) {
-        item.set(itemset.getItems().toString());
-        context.write(item, one);
-      }
+      String txt = txnRecord.toString();
+//      List<Set> candidateSetsInTxn = Apriori.findSets(hashTreeRootNode, txn, 0);
+//      for(Set itemset : candidateItemsetsInTxn) {
+//        item.set(itemset.getItems().toString());
+//        context.write(item, one);
+//      }
 
     }
   }
