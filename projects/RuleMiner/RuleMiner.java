@@ -90,7 +90,7 @@ public class RuleMiner extends Configured implements Tool
 
       StringTokenizer itr = new StringTokenizer(value.toString());
 
-      private Text token = new Text();
+      Text token = new Text();
 
       int id;
 
