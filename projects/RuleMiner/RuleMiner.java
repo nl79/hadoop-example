@@ -88,22 +88,21 @@ public class RuleMiner extends Configured implements Tool
 
     public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
 
-      StringTokenizer itr = new StringTokenizer(value.toString());
+      String[] tokens = value.toString().split(",");
 
       Text token = new Text();
 
       int id;
 
       //first token is ID
-      if(itr.hasMoreTokens()) {
-        id = Integer.parseInt(itr.nextToken().toString());
+      if(tokens.length > 0) {
+        id = Integer.parseInt(tokens[0]);
       }
 
-      while (itr.hasMoreTokens()) {
+      for(int i = 1; i < tokens.length; ++i) {
+        token.set(tokens[i].toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim());
 
-        token.set(itr.nextToken().toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim());
         context.write(token, new IntWritable(1));
-
       }
     }
   }
@@ -127,7 +126,6 @@ public class RuleMiner extends Configured implements Tool
       Double support = Double.parseDouble(context.getConfiguration().get("support"));
 
       Integer total = context.getConfiguration().getInt("total", 2);
-
 
       // calculate min support and add to the output
       if(Apriori.hasSupport(support, total, count)) {

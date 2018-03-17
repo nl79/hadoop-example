@@ -19,6 +19,7 @@ public class Apriori {
 
   public static boolean hasSupport(double support, int total,  int count) {
     double result = (double)count / (double)total;
+    
     return result >= support;
   }
 
