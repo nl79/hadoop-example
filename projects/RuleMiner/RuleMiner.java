@@ -12,6 +12,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
+import java.util.Arrays;
 import java.util.StringTokenizer;
 import java.io.BufferedReader;
 import java.io.*;
@@ -56,11 +57,13 @@ public class RuleMiner extends Configured implements Tool
     throws IOException, InterruptedException, ClassNotFoundException
   {
     boolean success = false;
+    String outputDir = hdfsOutputDirPrefix + "-" + iteration;
 
     Configuration config = new Configuration();
     config.setInt("iteration", iteration);
     config.set("support", Double.toString(MIN_SUPPORT_PERCENT));
     config.setInt("total", MAX_NUM_TXNS);
+    config.set("output", hdfsOutputDirPrefix);
 
     Job job = new Job(config, jobPrefix + iteration);
 
@@ -77,7 +80,7 @@ public class RuleMiner extends Configured implements Tool
     }
 
     FileInputFormat.addInputPath(job, new Path(hdfsInputDir));
-    FileOutputFormat.setOutputPath(job, new Path(hdfsOutputDirPrefix + iteration));
+    FileOutputFormat.setOutputPath(job, new Path(outputDir));
 
     success = (job.waitForCompletion(true) ? true : false);
 
@@ -131,8 +134,6 @@ public class RuleMiner extends Configured implements Tool
       if(Apriori.hasSupport(support, total, count)) {
         context.write(new Text(set), new IntWritable(count));
       }
-
-      //
     }
   }
 
@@ -140,15 +141,22 @@ public class RuleMiner extends Configured implements Tool
     private final static IntWritable one = new IntWritable(1);
     private Text item = new Text();
 
-    private List<Set> largeItemsetsPrevPass = new ArrayList<Set>();
-    private List<Set> candidateItemsets     = null;
+    private List<String> kSet = new ArrayList<String>();
+
+    private int iteration = 0;
 
     @Override
     public void setup(Context context) throws IOException {
       //Path[] uris = DistributedCache.getLocalCacheFiles(context.getConfiguration());
 
-      int iteration = context.getConfiguration().getInt("iteration", 2);
-      String opFileLastPass = context.getConfiguration().get("fs.default.name") + "/user/user/RuleMiner-out-" + (iteration-1) + "/part-r-00000";
+      String outputDir = context.getConfiguration().get("output");
+
+      this.iteration = context.getConfiguration().getInt("iteration", 2);
+
+      // Output file from the previous iteration.
+      String opFileLastPass = context.getConfiguration().get("fs.default.name") + outputDir + "-" + (iteration-1) + "/part-r-00000";
+
+      System.out.println("opFileLastPass: " + opFileLastPass);
 
       try
       {
@@ -157,40 +165,116 @@ public class RuleMiner extends Configured implements Tool
         BufferedReader fis=new BufferedReader(new InputStreamReader(fs.open(pt)));
         String currLine = null;
         //System.out.println("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        // Read each line of the previous iteration
         while ((currLine = fis.readLine()) != null) {
           currLine = currLine.trim();
-          String[] words = currLine.split("[\\s\\t]+");
-          if(words.length < 2) {
+          String[] parts = currLine.split("[\\s\\t]+");
+          if(parts.length < 2) {
             continue;
           }
 
-          List<Integer> items = new ArrayList<Integer>();
-          for(int k=0; k < words.length -1 ; k++){
-            String csvItemIds = words[k];
-            String[] itemIds = csvItemIds.split(",");
-            for(String itemId : itemIds) {
-              items.add(Integer.parseInt(itemId));
-            }
-          }
-          String finalWord = words[words.length-1];
-          int supportCount = Integer.parseInt(finalWord);
+//          List<Integer> terms = new ArrayList<Integer>();
+//
+//          for(int k=0; k < parts.length -1 ; k++){
+//            String csvItemIds = words[k];
+//            String[] itemIds = csvItemIds.split(",");
+//            for(String itemId : itemIds) {
+//              items.add(Integer.parseInt(itemId));
+//            }
+//          }
+          //System.out.println("Terms: " + parts[0]);
+
+          this.kSet.add(parts[0]);
+
+//          String finalWord = words[words.length-1];
+//          int supportCount = Integer.parseInt(finalWord);
           //System.out.println(items + " --> " + supportCount);
-          largeItemsetsPrevPass.add(new Set(items, supportCount));
+//          largeItemsetsPrevPass.add(new Set(items, supportCount));
         }
       }
       catch(Exception e)
       {
       }
-
-      candidateItemsets = Apriori.getCandidateSets(largeItemsetsPrevPass, (iteration-1));
+//      candidateItemsets = Apriori.getCandidateSets(largeItemsetsPrevPass, (iteration-1));
     }
 
-    public void map(Object key, Text txnRecord, Context context) throws IOException, InterruptedException {
-      String txt = txnRecord.toString();
-//      List<Set> candidateSetsInTxn = Apriori.findSets(hashTreeRootNode, txn, 0);
-//      for(Set itemset : candidateItemsetsInTxn) {
-//        item.set(itemset.getItems().toString());
-//        context.write(item, one);
+    public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+      //String[] tokens = value.toString().split(",");
+
+      Text token = new Text();
+//      List<String> kThSet = Arrays.asList(tokens);
+      List<String> tokens = Arrays.asList(value.toString().split(","));
+      String[] parts;
+
+      // Check if there are a minimum terms in the transaction
+      if(tokens.size()-1 < this.iteration) {
+        System.out.println("tokens.length-1 < this.iteration");
+        return;
+      }
+
+      System.out.println("Building Sets based on Iteration Count");
+
+      for (String set : kSet) {
+
+        // check if the 'set' is a set in the current transaction
+        // If not, there is no point in further processing.
+        parts = set.split(",");
+        for(int i = 0; i < parts.length; ++i) {
+
+          if(!tokens.contains(parts[i])) {
+            System.out.println("Token not found in transaction, skipping iteration: " + parts[i]);
+            continue;
+          }
+        }
+
+
+        // Since the set exists in the current transaction, build combination of the current set,
+        // and all the terms in the transaction.
+        for (String term : tokens) {
+
+          term = term.toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
+          // Replate the term in the ith position with the new concatenated value.
+          // previous values plus new value:  a,b + ,c
+          String newSet = set + "," + term;
+          System.out.println("New Set: " + newSet);
+
+          context.write(new Text(newSet), new IntWritable(1));
+        }
+
+//        for(int j = 1; j < tokens.length; ++j) {
+//
+//          term = tokens[j].toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
+//          // Replate the term in the ith position with the new concatenated value.
+//          // previous values plus new value:  a,b + ,c
+//          String newSet = set + "," + term;
+//          System.out.println("New Set: " + newSet);
+//
+//          context.write(new Text(newSet), new IntWritable(1));
+//        }
+      }
+
+
+      // Prebuild the base (kth) set.
+//      for(int i = 1; i <= this.iteration; ++i) {
+//
+//        // Iterate over the last kthSet list and build the new sets by adding each term
+//        for (String item : kThSet) {
+//
+//          for(int j = 1; j < tokens.length; ++j) {
+//
+//            term = tokens[j].toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
+//            // Replate the term in the ith position with the new concatenated value.
+//            // previous values plus new value:  a,b + ,c
+//            String pair = item + "," + term;
+//            System.out.println("New Pair: " + pair);
+//            temp.add(pair);
+//          }
+//        }
+//
+//        kThSet = temp;
+//        temp = new ArrayList<String>();
+//
 //      }
 
     }
