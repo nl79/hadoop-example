@@ -164,7 +164,6 @@ public class RuleMiner extends Configured implements Tool
         FileSystem fs = FileSystem.get(context.getConfiguration());
         BufferedReader fis=new BufferedReader(new InputStreamReader(fs.open(pt)));
         String currLine = null;
-        //System.out.println("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         // Read each line of the previous iteration
         while ((currLine = fis.readLine()) != null) {
@@ -174,46 +173,25 @@ public class RuleMiner extends Configured implements Tool
             continue;
           }
 
-//          List<Integer> terms = new ArrayList<Integer>();
-//
-//          for(int k=0; k < parts.length -1 ; k++){
-//            String csvItemIds = words[k];
-//            String[] itemIds = csvItemIds.split(",");
-//            for(String itemId : itemIds) {
-//              items.add(Integer.parseInt(itemId));
-//            }
-//          }
-          //System.out.println("Terms: " + parts[0]);
-
           this.kSet.add(parts[0]);
-
-//          String finalWord = words[words.length-1];
-//          int supportCount = Integer.parseInt(finalWord);
-          //System.out.println(items + " --> " + supportCount);
-//          largeItemsetsPrevPass.add(new Set(items, supportCount));
         }
       }
       catch(Exception e)
       {
       }
-//      candidateItemsets = Apriori.getCandidateSets(largeItemsetsPrevPass, (iteration-1));
     }
 
     public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
-      //String[] tokens = value.toString().split(",");
 
       Text token = new Text();
-//      List<String> kThSet = Arrays.asList(tokens);
       List<String> tokens = Arrays.asList(value.toString().split(","));
+      List<String> temp;
       String[] parts;
 
       // Check if there are a minimum terms in the transaction
       if(tokens.size()-1 < this.iteration) {
-        System.out.println("tokens.length-1 < this.iteration");
         return;
       }
-
-      System.out.println("Building Sets based on Iteration Count");
 
       for (String set : kSet) {
 
@@ -228,55 +206,28 @@ public class RuleMiner extends Configured implements Tool
           }
         }
 
-
         // Since the set exists in the current transaction, build combination of the current set,
         // and all the terms in the transaction.
         for (String term : tokens) {
 
           term = term.toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
-          // Replate the term in the ith position with the new concatenated value.
-          // previous values plus new value:  a,b + ,c
+
+          // Check for duplicate items in the set and skip.
+          temp = Arrays.asList(parts);
+          if(temp.contains(term)) {
+            System.out.println("Duplicate Found! Skipping: SET(" + set + ") | TERM(" + term + ")");
+
+            continue;
+          }
+
+          // Build a new Set
           String newSet = set + "," + term;
+
           System.out.println("New Set: " + newSet);
 
           context.write(new Text(newSet), new IntWritable(1));
         }
-
-//        for(int j = 1; j < tokens.length; ++j) {
-//
-//          term = tokens[j].toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
-//          // Replate the term in the ith position with the new concatenated value.
-//          // previous values plus new value:  a,b + ,c
-//          String newSet = set + "," + term;
-//          System.out.println("New Set: " + newSet);
-//
-//          context.write(new Text(newSet), new IntWritable(1));
-//        }
       }
-
-
-      // Prebuild the base (kth) set.
-//      for(int i = 1; i <= this.iteration; ++i) {
-//
-//        // Iterate over the last kthSet list and build the new sets by adding each term
-//        for (String item : kThSet) {
-//
-//          for(int j = 1; j < tokens.length; ++j) {
-//
-//            term = tokens[j].toString().toLowerCase().replaceAll("[^A-Za-z0-9]", "").trim();
-//            // Replate the term in the ith position with the new concatenated value.
-//            // previous values plus new value:  a,b + ,c
-//            String pair = item + "," + term;
-//            System.out.println("New Pair: " + pair);
-//            temp.add(pair);
-//          }
-//        }
-//
-//        kThSet = temp;
-//        temp = new ArrayList<String>();
-//
-//      }
-
     }
   }
 
