@@ -3,6 +3,7 @@ import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.filecache.DistributedCache;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -110,29 +111,36 @@ public class RuleMiner extends Configured implements Tool
     }
   }
 
-  public static class RuleReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+  public static class RuleReducer extends Reducer<Text, IntWritable, Text, DoubleWritable> {
+
+    // Get the support value from the config object
+    private double support = 0;
+    private int total = 0;
+
+    @Override
+    public void setup(Context context) throws IOException {
+
+      // Get the support value from the config object
+      this.support = Double.parseDouble(context.getConfiguration().get("support"));
+
+      this.total = context.getConfiguration().getInt("total", 2);
+    }
     public void reduce(Text terms, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 
-
       int count = 0;
-
+      double itemSupport = 0;
 
       // total up the number of occurances
-
       for (IntWritable value : values) {
         count += value.get();
       }
 
       String set = terms.toString();
 
-      // Get the support value from the config object
-      Double support = Double.parseDouble(context.getConfiguration().get("support"));
-
-      Integer total = context.getConfiguration().getInt("total", 2);
-
+      itemSupport = Apriori.support(count, this.total);
       // calculate min support and add to the output
-      if(Apriori.hasSupport(support, total, count)) {
-        context.write(new Text(set), new IntWritable(count));
+      if(itemSupport >= this.support) {
+        context.write(new Text(set), new DoubleWritable(itemSupport));
       }
     }
   }
